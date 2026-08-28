@@ -88,7 +88,7 @@
             </div>
             <div class="window-url-bar">
               <Lock :size="12" />
-              <span>app.Todue .com/app/today</span>
+              <span>app.todue.com/app/today</span>
             </div>
             <div class="window-actions"></div>
           </div>

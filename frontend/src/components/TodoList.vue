@@ -123,6 +123,14 @@
         @clear="$emit('clear-filters')"
       />
 
+      <!-- Inline Add Task Trigger Button (Always accessible below title) -->
+      <div v-if="!showForm" class="inline-add-task-container">
+        <button class="inline-add-btn" @click="showForm = true">
+          <Plus :size="16" class="inline-add-icon" />
+          <span>Add task</span>
+        </button>
+      </div>
+
       <!-- Quick Add Form -->
       <div v-if="showForm" class="quick-add-section">
         <TodoForm
@@ -144,8 +152,8 @@
         <button class="btn btn-ghost btn-sm" @click="$emit('retry')">Retry</button>
       </div>
 
-      <!-- Todue  Celebration Empty State -->
-      <div v-else-if="todos.length === 0 && !showForm" class="Todue -empty-state">
+      <!-- Celebration Empty State -->
+      <div v-else-if="todos.length === 0 && !showForm" class="empty-celebration-state">
         <div class="illustration-wrapper">
           <svg class="celebration-illustration" viewBox="0 0 280 200" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M40 160C45 130 65 110 90 120C100 124 105 135 105 150" stroke="#7ea38b" stroke-width="8" stroke-linecap="round"/>
@@ -186,14 +194,6 @@
           @delete="handleDelete"
           @update-status="handleStatusUpdate"
         />
-
-        <!-- Inline Add Task Trigger Button at bottom of list -->
-        <div v-if="!showForm" class="inline-add-task-container">
-          <button class="inline-add-btn" @click="showForm = true">
-            <Plus :size="16" class="inline-add-icon" />
-            <span>Add task</span>
-          </button>
-        </div>
       </div>
 
       <!-- Pagination Bar -->
@@ -738,8 +738,8 @@ defineExpose({ openForm })
   font-size: var(--font-size-sm);
 }
 
-/* ── Todue  Celebration Empty State ────────────────────── */
-.Todue -empty-state {
+/* ── Celebration Empty State ────────────────────────────── */
+.empty-celebration-state {
   display: flex;
   flex-direction: column;
   align-items: center;

@@ -48,7 +48,29 @@ todoweb-ebm/
     └── migration.sql
 ```
 
-## Quick Start
+## Quick Start with Docker (Recommended 🐳)
+
+Make sure you have [Docker](https://www.docker.com/) and Docker Compose installed.
+
+1. Ensure your Supabase credentials are set in `backend/.env`:
+   ```bash
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_KEY=your-anon-key
+   SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+   JWT_SECRET=your-jwt-secret
+   ```
+
+2. Run the entire application with one command:
+   ```bash
+   docker compose up --build
+   ```
+
+- **Frontend (Todue)**: [http://localhost:5173](http://localhost:5173) or [http://localhost](http://localhost)
+- **Backend API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+## Manual Local Setup (Without Docker)
 
 ### 1. Setup Supabase
 

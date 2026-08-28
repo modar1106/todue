@@ -98,7 +98,7 @@
       <!-- Quick Add Task Button -->
       <div class="quick-add-container">
         <button
-          class="Todue -add-task-btn"
+          class="quick-add-task-btn"
           @click="$emit('quick-add')"
           title="Add task"
         >
@@ -711,7 +711,7 @@ onUnmounted(() => {
   margin: 2px 0 6px;
 }
 
-.Todue -add-task-btn {
+.quick-add-task-btn {
   width: 100%;
   display: flex;
   align-items: center;
@@ -724,12 +724,12 @@ onUnmounted(() => {
   transition: all var(--transition-fast);
 }
 
-.sidebar.collapsed .Todue -add-task-btn {
+.sidebar.collapsed .quick-add-task-btn {
   justify-content: center;
   padding: 8px 0;
 }
 
-.Todue -add-task-btn:hover {
+.quick-add-task-btn:hover {
   background: var(--bg-hover);
 }
 

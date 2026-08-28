@@ -1,0 +1,48 @@
+services:
+  # ============================================================
+  # Backend Service — FastAPI (Python 3.12)
+  # ============================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: todue-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - todue-network
+
+  # ============================================================
+  # Frontend Service — Vue 3 + Nginx
+  # ============================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: todue-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - todue-network
+
+# ============================================================
+# Networks
+# ============================================================
+networks:
+  todue-network:
+    name: todue-network
+    driver: bridge
