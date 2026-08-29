@@ -8,10 +8,46 @@
       <div class="upcoming-header">
         <h1 class="list-title">Upcoming</h1>
         <div class="upcoming-controls">
-          <button class="month-selector-btn">
-            <span>{{ currentMonthYearLabel }}</span>
-            <ChevronDown :size="14" />
-          </button>
+          <div class="month-selector-wrapper" ref="monthSelectorRef">
+            <button
+              class="month-selector-btn"
+              @click="toggleMonthDropdown"
+              title="Select Month"
+            >
+              <span>{{ currentMonthYearLabel }}</span>
+              <ChevronDown :size="14" class="month-chevron" :class="{ rotated: showMonthDropdown }" />
+            </button>
+
+            <!-- Month Dropdown Popover -->
+            <transition name="dropdown">
+              <div v-if="showMonthDropdown" class="month-dropdown-popover">
+                <div class="month-popover-header">
+                  <button type="button" class="year-nav-btn" @click="pickerYear--" title="Previous year">
+                    <ChevronLeft :size="14" />
+                  </button>
+                  <span class="popover-year-label">{{ pickerYear }}</span>
+                  <button type="button" class="year-nav-btn" @click="pickerYear++" title="Next year">
+                    <ChevronRight :size="14" />
+                  </button>
+                </div>
+
+                <div class="month-grid">
+                  <button
+                    v-for="(mName, mIdx) in monthNames"
+                    :key="mName"
+                    type="button"
+                    :class="['month-grid-btn', {
+                      active: isSelectedMonth(pickerYear, mIdx),
+                      current: isCurrentMonth(pickerYear, mIdx)
+                    }]"
+                    @click="selectMonth(pickerYear, mIdx)"
+                  >
+                    {{ mName }}
+                  </button>
+                </div>
+              </div>
+            </transition>
+          </div>
 
           <div class="week-nav-group">
             <button class="week-nav-btn" @click="changeWeek(-1)" title="Previous week">
@@ -102,6 +138,7 @@
             <div class="list-subtitle">
               <CheckCircle2 :size="13" class="subtitle-icon" />
               <span>{{ activeTaskCount }} task{{ activeTaskCount === 1 ? '' : 's' }}</span>
+              <span v-if="isLoading && todos.length > 0" class="subtle-spinner" title="Refreshing..."></span>
             </div>
           </div>
         </div>
@@ -134,13 +171,14 @@
       <!-- Quick Add Form -->
       <div v-if="showForm" class="quick-add-section">
         <TodoForm
+          :initial-project="filters?.project"
           @submit="handleCreate"
           @cancel="showForm = false"
         />
       </div>
 
-      <!-- Loading State -->
-      <div v-if="isLoading" class="loading-state">
+      <!-- Loading State (Shown only on initial fetch when no tasks exist yet) -->
+      <div v-if="isLoading && todos.length === 0" class="loading-state">
         <div class="spinner spinner-lg"></div>
         <span class="loading-text">Loading tasks...</span>
       </div>
@@ -184,7 +222,7 @@
       </div>
 
       <!-- Todo Items List -->
-      <div v-else class="todo-items">
+      <div v-else class="todo-items" :class="{ 'tasks-dimmed': isLoading }">
         <TodoItem
           v-for="todo in todos"
           :key="todo.id"
@@ -222,7 +260,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
   Menu,
   Plus,
@@ -271,8 +309,65 @@ const activeSectionForm = ref(null)
 const weekOffset = ref(0)
 const selectedDate = ref('')
 
+const showMonthDropdown = ref(false)
+const monthSelectorRef = ref(null)
+const pickerYear = ref(new Date().getFullYear())
+
+const monthNames = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+]
+
+function toggleMonthDropdown() {
+  showMonthDropdown.value = !showMonthDropdown.value
+  if (showMonthDropdown.value) {
+    const today = new Date()
+    const viewedDate = new Date(today)
+    viewedDate.setDate(today.getDate() + weekOffset.value * 7)
+    pickerYear.value = viewedDate.getFullYear()
+  }
+}
+
+function isSelectedMonth(year, monthIdx) {
+  const today = new Date()
+  const viewedDate = new Date(today)
+  viewedDate.setDate(today.getDate() + weekOffset.value * 7)
+  return viewedDate.getFullYear() === year && viewedDate.getMonth() === monthIdx
+}
+
+function isCurrentMonth(year, monthIdx) {
+  const now = new Date()
+  return now.getFullYear() === year && now.getMonth() === monthIdx
+}
+
+function selectMonth(year, monthIdx) {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const targetDate = new Date(year, monthIdx, 1)
+  targetDate.setHours(0, 0, 0, 0)
+
+  const diffDays = Math.round((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+  weekOffset.value = Math.floor(diffDays / 7)
+  selectedDate.value = ''
+  showMonthDropdown.value = false
+}
+
+function handleClickOutsideMonth(e) {
+  if (monthSelectorRef.value && !monthSelectorRef.value.contains(e.target)) {
+    showMonthDropdown.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutsideMonth)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutsideMonth)
+})
+
 const isUpcomingView = computed(() => {
-  return props.filters?.status === 'progress'
+  return props.filters?.view === 'upcoming' || props.filters?.status === 'progress'
 })
 
 const userName = computed(() => {
@@ -280,6 +375,9 @@ const userName = computed(() => {
 })
 
 const activeTaskCount = computed(() => {
+  if (props.filters?.status === 'done' || props.filters?.view === 'done') {
+    return props.pagination?.total ?? props.todos.length
+  }
   return props.todos.filter(t => t.status !== 'done').length || props.pagination?.total || 0
 })
 
@@ -289,12 +387,12 @@ const hasFilters = computed(() => {
 
 const pageTitle = computed(() => {
   if (props.filters?.project) return props.filters.project
+  if (props.filters?.view === 'done' || props.filters?.status === 'done') return 'Completed Tasks'
   if (props.filters?.view === 'inbox') return 'Inbox'
   if (props.filters?.view === 'today') return 'Today'
   if (props.filters?.view === 'upcoming') return 'Upcoming'
   if (props.filters?.status === 'pending') return 'Today'
   if (props.filters?.status === 'progress') return 'Upcoming'
-  if (props.filters?.status === 'done') return 'Completed'
   if (props.filters?.priority === 'high') return 'High Priority'
   if (props.filters?.priority === 'medium') return 'Medium Priority'
   if (props.filters?.priority === 'low') return 'Low Priority'
@@ -336,36 +434,66 @@ const upcomingSections = computed(() => {
   const sections = []
   const today = new Date()
   const todayIso = today.toISOString().split('T')[0]
+  const tomorrow = new Date(today)
+  tomorrow.setDate(today.getDate() + 1)
+  const tomorrowIso = tomorrow.toISOString().split('T')[0]
 
-  for (let i = 0; i < 5; i++) {
-    const d = new Date(today)
-    d.setDate(today.getDate() + i)
-    const iso = d.toISOString().split('T')[0]
+  // Display either the selected day or all 7 days of the viewed week
+  const days = selectedDate.value
+    ? weekDays.value.filter(d => d.iso === selectedDate.value)
+    : weekDays.value
+
+  for (const day of days) {
+    const parts = day.iso.split('-').map(Number)
+    const dateObj = new Date(parts[0], parts[1] - 1, parts[2])
+    const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' })
+    const monthName = dateObj.toLocaleDateString('en-US', { month: 'short' })
 
     let label = ''
-    const dayName = d.toLocaleDateString('en-US', { weekday: 'long' })
-    const dayDate = d.getDate()
-    const monthName = d.toLocaleDateString('en-US', { month: 'short' })
-
-    if (i === 0) {
-      label = `${dayDate} ${monthName} · Today · ${dayName}`
-    } else if (i === 1) {
-      label = `${dayDate} ${monthName} · Tomorrow · ${dayName}`
+    if (day.iso === todayIso) {
+      label = `${day.number} ${monthName} · Today · ${dayName}`
+    } else if (day.iso === tomorrowIso) {
+      label = `${day.number} ${monthName} · Tomorrow · ${dayName}`
     } else {
-      label = `${dayDate} ${monthName} · ${dayName}`
+      label = `${day.number} ${monthName} · ${dayName}`
     }
 
-    // Tasks scheduled for this date or pending
     const tasksForDay = props.todos.filter(t => {
-      if (t.due_date) return t.due_date === iso
-      return i === 0 // Unscheduled tasks show on Today
+      if (t.due_date) return t.due_date === day.iso
+      return day.iso === todayIso
     })
 
     sections.push({
-      iso,
+      iso: day.iso,
       label,
       tasks: tasksForDay,
     })
+  }
+
+  // Also include any tasks with due dates outside this week
+  const weekSet = new Set(weekDays.value.map(d => d.iso))
+  const externalDates = [...new Set(props.todos.map(t => t.due_date).filter(Boolean))]
+    .filter(iso => !weekSet.has(iso))
+    .sort()
+
+  for (const extIso of externalDates) {
+    const parts = extIso.split('-').map(Number)
+    if (parts.length === 3 && !parts.some(isNaN)) {
+      const dateObj = new Date(parts[0], parts[1] - 1, parts[2])
+      const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' })
+      const monthName = dateObj.toLocaleDateString('en-US', { month: 'short' })
+      const dayNum = dateObj.getDate()
+      const label = `${dayNum} ${monthName} · ${dayName}`
+
+      const tasksForDay = props.todos.filter(t => t.due_date === extIso)
+      if (tasksForDay.length > 0) {
+        sections.push({
+          iso: extIso,
+          label,
+          tasks: tasksForDay,
+        })
+      }
+    }
   }
 
   return sections
@@ -381,7 +509,7 @@ function resetToToday() {
 }
 
 function selectDay(iso) {
-  selectedDate.value = iso
+  selectedDate.value = selectedDate.value === iso ? '' : iso
 }
 
 function openSectionForm(iso) {
@@ -534,6 +662,10 @@ defineExpose({ openForm })
   margin-top: 10px;
 }
 
+.month-selector-wrapper {
+  position: relative;
+}
+
 .month-selector-btn {
   display: flex;
   align-items: center;
@@ -544,12 +676,101 @@ defineExpose({ openForm })
   background: transparent;
   border: none;
   cursor: pointer;
-  padding: 4px 6px;
+  padding: 4px 8px;
   border-radius: var(--border-radius-sm);
+  transition: background var(--transition-fast);
 }
 
 .month-selector-btn:hover {
   background: var(--bg-hover);
+}
+
+.month-chevron {
+  transition: transform var(--transition-fast);
+}
+
+.month-chevron.rotated {
+  transform: rotate(180deg);
+}
+
+.month-dropdown-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--border-radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 12px;
+  width: 220px;
+  z-index: 100;
+}
+
+.month-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.popover-year-label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.year-nav-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: var(--border-radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.year-nav-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.month-grid-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--border-radius-sm);
+  padding: 6px 4px;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: center;
+}
+
+.month-grid-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.month-grid-btn.current {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.month-grid-btn.active {
+  background: var(--color-primary);
+  color: #ffffff;
+  font-weight: 600;
 }
 
 .week-nav-group {
@@ -711,6 +932,24 @@ defineExpose({ openForm })
 }
 
 /* ── Loading / Error ────────────────────────────────────── */
+.subtle-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-default);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
+.tasks-dimmed {
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
 .loading-state {
   display: flex;
   flex-direction: column;

@@ -3,8 +3,10 @@ Todo service — Business logic layer for Todo CRUD operations.
 Handles Supabase queries with filtering, sorting, pagination, and bulk insert.
 """
 
+import datetime
 import math
 import random
+import time
 from typing import Optional
 
 import uuid6
@@ -14,6 +16,7 @@ from app.database import get_supabase_admin
 
 
 fake = Faker()
+_stats_cache: dict = {}
 
 
 class TodoService:
@@ -63,65 +66,72 @@ class TodoService:
         # Calculate offset
         offset = (page - 1) * page_size
 
-        # --- Count query (for total) ---
-        count_query = (
+        query = (
             self.admin.table("todos")
-            .select("id", count="exact")
+            .select("*", count="exact")
             .eq("user_id", user_id)
         )
 
-        # --- Data query ---
-        data_query = (
-            self.admin.table("todos")
-            .select("*")
-            .eq("user_id", user_id)
-        )
-
-        # Apply filters to both queries
         if status:
-            count_query = count_query.eq("status", status)
-            data_query = data_query.eq("status", status)
+            query = query.eq("status", status)
 
         if priority:
-            count_query = count_query.eq("priority", priority)
-            data_query = data_query.eq("priority", priority)
+            query = query.eq("priority", priority)
 
         if due_date:
-            count_query = count_query.eq("due_date", due_date)
-            data_query = data_query.eq("due_date", due_date)
+            query = query.eq("due_date", due_date)
 
         if project:
-            count_query = count_query.eq("project", project)
-            data_query = data_query.eq("project", project)
+            if project.lower() == "inbox":
+                query = query.or_("project.ilike.Inbox,project.is.null")
+            else:
+                query = query.ilike("project", project)
 
         if search:
             # Search in title and description using ilike (case-insensitive)
             search_pattern = f"%{search}%"
-            count_query = count_query.or_(
+            query = query.or_(
                 f"title.ilike.{search_pattern},description.ilike.{search_pattern}"
             )
-            data_query = data_query.or_(
-                f"title.ilike.{search_pattern},description.ilike.{search_pattern}"
-            )
-
-        # Execute count query
-        count_result = count_query.execute()
-        total = count_result.count if count_result.count is not None else 0
 
         # Apply sorting
         is_descending = sort_order.lower() == "desc"
-        data_query = data_query.order(sort_by, desc=is_descending)
+        query = query.order(sort_by, desc=is_descending)
 
         # Apply pagination (range is 0-indexed, inclusive)
-        data_query = data_query.range(offset, offset + page_size - 1)
+        query = query.range(offset, offset + page_size - 1)
 
-        # Execute data query
-        data_result = data_query.execute()
+        try:
+            result = query.execute()
+            data = result.data
+            total = result.count if result.count is not None else len(data)
+        except Exception as err:
+            err_str = str(err)
+            if "PGRST204" in err_str or "schema cache" in err_str:
+                # Graceful single-query fallback if project or due_date column is missing in Supabase
+                fallback = (
+                    self.admin.table("todos")
+                    .select("*", count="exact")
+                    .eq("user_id", user_id)
+                )
+                if status:
+                    fallback = fallback.eq("status", status)
+                if priority:
+                    fallback = fallback.eq("priority", priority)
+                if search:
+                    sp = f"%{search}%"
+                    fallback = fallback.or_(f"title.ilike.{sp},description.ilike.{sp}")
+
+                result = fallback.order(sort_by, desc=is_descending).range(offset, offset + page_size - 1).execute()
+                data = result.data
+                total = result.count if result.count is not None else len(data)
+            else:
+                raise err
 
         total_pages = math.ceil(total / page_size) if page_size > 0 else 0
 
         return {
-            "data": data_result.data,
+            "data": data,
             "total": total,
             "page": page,
             "page_size": page_size,
@@ -157,6 +167,7 @@ class TodoService:
         Returns:
             Created todo dict
         """
+        _stats_cache.pop(user_id, None)
         todo_data = {
             "id": str(uuid6.uuid7()),
             "user_id": user_id,
@@ -168,12 +179,22 @@ class TodoService:
             "project": data.get("project", "Inbox"),
         }
 
-        result = self.admin.table("todos").insert(todo_data).execute()
-        return result.data[0]
+        try:
+            result = self.admin.table("todos").insert(todo_data).execute()
+            return result.data[0]
+        except Exception as err:
+            err_str = str(err)
+            if "PGRST204" in err_str or "schema cache" in err_str:
+                # Fallback if due_date / project column has not been added to Supabase yet
+                todo_data.pop("due_date", None)
+                todo_data.pop("project", None)
+                result = self.admin.table("todos").insert(todo_data).execute()
+                return result.data[0]
+            raise err
 
     def get_stats(self, user_id: str) -> dict:
         """
-        Fetch task statistics count grouped by status for a user in a single query.
+        Fetch task statistics count grouped by status for a user with in-memory caching.
 
         Args:
             user_id: Owner user ID
@@ -181,6 +202,12 @@ class TodoService:
         Returns:
             dict with total (active tasks), pending, progress, done counts
         """
+        now = time.time()
+        if user_id in _stats_cache:
+            entry = _stats_cache[user_id]
+            if now - entry["timestamp"] < 10:  # 10s TTL
+                return entry["data"]
+
         result = (
             self.admin.table("todos")
             .select("status")
@@ -197,6 +224,7 @@ class TodoService:
             # Total active/uncompleted tasks for badges
             counts["total"] = counts["pending"] + counts["progress"]
 
+        _stats_cache[user_id] = {"data": counts, "timestamp": now}
         return counts
 
     def update_todo(self, todo_id: str, user_id: str, data: dict) -> Optional[dict]:
@@ -211,21 +239,40 @@ class TodoService:
         Returns:
             Updated todo dict or None if not found/not owned.
         """
+        _stats_cache.pop(user_id, None)
         update_data = {k: v for k, v in data.items() if v is not None}
         if not update_data:
             return self.get_todo_by_id(todo_id, user_id)
 
-        result = (
-            self.admin.table("todos")
-            .update(update_data)
-            .eq("id", todo_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
-
-        if result.data and len(result.data) > 0:
-            return result.data[0]
-        return None
+        try:
+            result = (
+                self.admin.table("todos")
+                .update(update_data)
+                .eq("id", todo_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            return None
+        except Exception as err:
+            err_str = str(err)
+            if "PGRST204" in err_str or "schema cache" in err_str:
+                update_data.pop("due_date", None)
+                update_data.pop("project", None)
+                if not update_data:
+                    return self.get_todo_by_id(todo_id, user_id)
+                result = (
+                    self.admin.table("todos")
+                    .update(update_data)
+                    .eq("id", todo_id)
+                    .eq("user_id", user_id)
+                    .execute()
+                )
+                if result.data and len(result.data) > 0:
+                    return result.data[0]
+                return None
+            raise err
 
     def delete_todo(self, todo_id: str, user_id: str) -> bool:
         """
@@ -234,6 +281,7 @@ class TodoService:
         Returns:
             True if deleted, False if not found/not owned.
         """
+        _stats_cache.pop(user_id, None)
         result = (
             self.admin.table("todos")
             .delete()
@@ -255,8 +303,17 @@ class TodoService:
         Returns:
             Number of todos successfully created.
         """
+        _stats_cache.pop(user_id, None)
         statuses = ["pending", "progress", "done"]
         priorities = ["low", "medium", "high"]
+        projects = ["Inbox", "Work", "Personal", "Study"]
+
+        today = datetime.date.today()
+        # Diverse sample due dates for upcoming/today views
+        sample_due_dates = [
+            (today + datetime.timedelta(days=d)).isoformat()
+            for d in range(-2, 14)
+        ] + [None, None]
 
         # Task title templates for variety
         task_templates = [
@@ -290,10 +347,23 @@ class TodoService:
                         "description": fake.paragraph(nb_sentences=random.randint(1, 4)),
                         "status": random.choice(statuses),
                         "priority": random.choice(priorities),
+                        "project": random.choice(projects),
+                        "due_date": random.choice(sample_due_dates),
                     }
                 )
 
-            result = self.admin.table("todos").insert(batch).execute()
-            total_inserted += len(result.data)
+            try:
+                result = self.admin.table("todos").insert(batch).execute()
+                total_inserted += len(result.data)
+            except Exception as err:
+                err_str = str(err)
+                if "PGRST204" in err_str or "schema cache" in err_str:
+                    for item in batch:
+                        item.pop("due_date", None)
+                        item.pop("project", None)
+                    result = self.admin.table("todos").insert(batch).execute()
+                    total_inserted += len(result.data)
+                else:
+                    raise err
 
         return total_inserted

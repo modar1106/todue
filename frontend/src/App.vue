@@ -17,6 +17,15 @@
 
     <!-- ── 3. Main App Dashboard (at '/app') ────────────────── -->
     <div v-else-if="isAuthenticated" class="app-layout">
+      <!-- Mobile Backdrop Overlay -->
+      <transition name="fade">
+        <div
+          v-if="!sidebarCollapsed && isMobile"
+          class="sidebar-backdrop"
+          @click="sidebarCollapsed = true"
+        ></div>
+      </transition>
+
       <!-- Sidebar -->
       <Sidebar
         :user="user"
@@ -24,7 +33,9 @@
         :filters="filters"
         :is-bulk-generating="isBulkGenerating"
         :is-collapsed="sidebarCollapsed"
+        :is-mobile="isMobile"
         @toggle="sidebarCollapsed = !sidebarCollapsed"
+        @close-mobile="sidebarCollapsed = true"
         @quick-add="openQuickAdd"
         @filter-view="handleFilterView"
         @filter-project="handleFilterProject"
@@ -79,7 +90,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from './composables/useAuth'
 import { useTodos } from './composables/useTodos'
@@ -130,23 +141,38 @@ const {
 } = useTodos()
 
 // ── UI State ─────────────────────────────────────────────
-const sidebarCollapsed = ref(false)
+const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth <= 768 : false)
+const sidebarCollapsed = ref(isMobile.value)
 const todoListRef = ref(null)
 const toasts = ref([])
 
+function handleResize() {
+  const mobile = window.innerWidth <= 768
+  if (mobile !== isMobile.value) {
+    isMobile.value = mobile
+    if (mobile) {
+      sidebarCollapsed.value = true
+    }
+  }
+}
+
 // ── Lifecycle ────────────────────────────────────────────
 onMounted(() => {
+  if (isMobile.value) {
+    sidebarCollapsed.value = true
+  }
+  window.addEventListener('resize', handleResize)
+
   if (route.path === '/app') {
-    if (route.query.view) {
-      filters.view = route.query.view
-      if (route.query.view === 'today') filters.status = 'pending'
-      if (route.query.view === 'upcoming') filters.status = 'progress'
-      if (route.query.view === 'done') filters.status = 'done'
-    }
-    if (route.query.project) filters.project = route.query.project
-    if (route.query.status) filters.status = route.query.status
-    if (route.query.priority) filters.priority = route.query.priority
-    if (route.query.search) filters.search = route.query.search
+    const newView = route.query.view || 'inbox'
+    const validStatuses = ['pending', 'progress', 'done']
+    filters.view = newView
+    filters.status = validStatuses.includes(route.query.status)
+      ? route.query.status
+      : (newView === 'today' ? 'pending' : newView === 'upcoming' ? 'progress' : newView === 'done' ? 'done' : '')
+    filters.project = route.query.project || ''
+    filters.priority = ['low', 'medium', 'high'].includes(route.query.priority) ? route.query.priority : ''
+    filters.search = route.query.search || ''
 
     if (isAuthenticated.value) {
       loadData()
@@ -154,6 +180,10 @@ onMounted(() => {
       router.replace('/login')
     }
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
 })
 
 // Watch route queries for browser back/forward and external navigation
@@ -175,21 +205,13 @@ watch(() => route.query, (newQuery) => {
     const newPriority = validPriorities.includes(newQuery.priority) ? newQuery.priority : ''
     const newSearch = newQuery.search || ''
 
-    if (
-      filters.view !== newView ||
-      filters.project !== newProject ||
-      filters.status !== newStatus ||
-      filters.priority !== newPriority ||
-      filters.search !== newSearch
-    ) {
-      filters.view = newView
-      filters.project = newProject
-      filters.status = newStatus
-      filters.priority = newPriority
-      filters.search = newSearch
-      pagination.page = 1
-      fetchTodos()
-    }
+    filters.view = newView
+    filters.project = newProject
+    filters.status = newStatus
+    filters.priority = newPriority
+    filters.search = newSearch
+    pagination.page = 1
+    fetchTodos()
   }
 })
 
@@ -252,16 +274,12 @@ async function handleStatusUpdate(id, status) {
 
 // ── Filter Handlers ──────────────────────────────────────
 function handleFilterView(view) {
-  clearFilters()
-  filters.view = view
+  clearFilters(false)
   if (view === 'today') {
-    filters.status = 'pending'
     router.replace({ path: '/app', query: { view: 'today' } })
   } else if (view === 'upcoming') {
-    filters.status = 'progress'
     router.replace({ path: '/app', query: { view: 'upcoming' } })
   } else if (view === 'done') {
-    filters.status = 'done'
     router.replace({ path: '/app', query: { view: 'done' } })
   } else {
     router.replace({ path: '/app', query: {} })
@@ -269,8 +287,7 @@ function handleFilterView(view) {
 }
 
 function handleFilterProject(project) {
-  clearFilters()
-  filters.project = project
+  clearFilters(false)
   router.replace({ path: '/app', query: { project } })
 }
 
@@ -286,9 +303,8 @@ function handleFilter(key, value) {
 }
 
 function handleFilterStatus(status) {
-  clearFilters()
-  if (status !== 'all') {
-    setFilter('status', status)
+  clearFilters(false)
+  if (status && status !== 'all') {
     router.replace({ path: '/app', query: { status } })
   } else {
     router.replace({ path: '/app', query: {} })
@@ -296,14 +312,12 @@ function handleFilterStatus(status) {
 }
 
 function handleFilterPriority(priority) {
-  clearFilters()
-  setFilter('priority', priority)
+  clearFilters(false)
   router.replace({ path: '/app', query: { priority } })
 }
 
 function handleClearFilters() {
-  clearFilters()
-  filters.view = 'inbox'
+  clearFilters(false)
   router.replace({ path: '/app', query: {} })
 }
 
@@ -415,5 +429,24 @@ function showToast(message, type = 'success') {
     opacity: 1;
     transform: translateX(0);
   }
+}
+
+/* ── Mobile Sidebar Backdrop ────────────────────────────── */
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1040;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.22s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

@@ -29,13 +29,19 @@
             <button
               type="button"
               class="tag-btn date-tag"
-              @click="cycleDueDate"
-              title="Set Due Date"
+              @click="openDatePicker"
+              title="Pick a Date"
             >
               <Calendar :size="14" class="tag-icon text-green" />
               <span>{{ dueDateLabel }}</span>
               <X v-if="dueDate" :size="12" class="tag-clear" @click.stop="dueDate = ''" />
             </button>
+            <input
+              ref="dateInputRef"
+              v-model="dueDate"
+              type="date"
+              class="hidden-date-input"
+            />
           </div>
 
           <!-- Project Picker Badge -->
@@ -103,6 +109,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  initialProject: {
+    type: String,
+    default: '',
+  },
 })
 
 const emit = defineEmits(['submit', 'cancel'])
@@ -113,8 +123,9 @@ const description = ref(props.editTodo?.description || '')
 const priority = ref(props.editTodo?.priority || 'low')
 const status = ref(props.editTodo?.status || 'pending')
 const dueDate = ref(props.editTodo?.due_date || props.initialDueDate || todayIsoString())
-const project = ref(props.editTodo?.project || 'Inbox')
+const project = ref(props.editTodo?.project || props.initialProject || 'Inbox')
 const titleInput = ref(null)
+const dateInputRef = ref(null)
 
 function todayIsoString() {
   return new Date().toISOString().split('T')[0]
@@ -130,22 +141,51 @@ const dueDateLabel = computed(() => {
   if (!dueDate.value) return 'Due date'
   if (dueDate.value === todayIsoString()) return 'Today'
   if (dueDate.value === tomorrowIsoString()) return 'Tomorrow'
-  const d = new Date(dueDate.value)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  try {
+    const parts = dueDate.value.split('-').map(Number)
+    if (parts.length === 3 && !parts.some(isNaN)) {
+      const dateObj = new Date(parts[0], parts[1] - 1, parts[2])
+      const currentYear = new Date().getFullYear()
+      const options = { month: 'short', day: 'numeric' }
+      if (parts[0] !== currentYear) {
+        options.year = 'numeric'
+      }
+      return dateObj.toLocaleDateString('en-US', options)
+    }
+    return dueDate.value
+  } catch {
+    return dueDate.value
+  }
 })
 
-function cycleDueDate() {
-  if (!dueDate.value || dueDate.value === tomorrowIsoString()) {
-    dueDate.value = todayIsoString()
-  } else if (dueDate.value === todayIsoString()) {
-    dueDate.value = tomorrowIsoString()
-  } else {
-    dueDate.value = ''
+function openDatePicker() {
+  if (dateInputRef.value) {
+    if (typeof dateInputRef.value.showPicker === 'function') {
+      dateInputRef.value.showPicker()
+    } else {
+      dateInputRef.value.focus()
+    }
   }
 }
 
+function getAvailableProjects() {
+  try {
+    const saved = localStorage.getItem('todue_projects')
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const names = parsed.map(p => p.name).filter(n => n.toLowerCase() !== 'inbox')
+        return ['Inbox', ...names]
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return ['Inbox', 'Work', 'Personal', 'Study']
+}
+
 function cycleProject() {
-  const projects = ['Inbox', 'Work', 'Personal', 'Study']
+  const projects = getAvailableProjects()
   const idx = projects.indexOf(project.value)
   project.value = projects[(idx + 1) % projects.length]
 }
@@ -269,11 +309,21 @@ function resetForm() {
   flex-wrap: wrap;
 }
 
-.badge-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+.badge-item {
+  position: relative;
+}
+
+.hidden-date-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  border: none;
+  padding: 0;
+  margin: 0;
 }
 
 .tag-btn {

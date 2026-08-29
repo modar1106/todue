@@ -53,7 +53,7 @@
         </transition>
       </div>
 
-      <!-- Action Buttons (Bell & Sidebar Toggle) -->
+      <!-- Action Buttons (Bell & Sidebar Toggle / Mobile Close) -->
       <div class="header-actions">
         <button
           v-if="!isCollapsed"
@@ -64,6 +64,15 @@
           <Bell :size="17" />
         </button>
         <button
+          v-if="isMobile && !isCollapsed"
+          class="header-btn close-mobile-btn"
+          @click="$emit('close-mobile')"
+          title="Close sidebar"
+        >
+          <X :size="18" />
+        </button>
+        <button
+          v-else
           class="header-btn"
           @click="$emit('toggle')"
           :title="isCollapsed ? 'Open sidebar' : 'Close sidebar'"
@@ -99,7 +108,7 @@
       <div class="quick-add-container">
         <button
           class="quick-add-task-btn"
-          @click="$emit('quick-add')"
+          @click="handleQuickAdd"
           title="Add task"
         >
           <div class="add-task-icon-circle">
@@ -117,7 +126,7 @@
         <!-- Search -->
         <button
           class="nav-link"
-          @click="$emit('open-search')"
+          @click="handleSearch"
           title="Search (Ctrl + K)"
         >
           <Search :size="18" class="link-icon" />
@@ -226,7 +235,7 @@
             <ChevronRight :size="14" class="section-chevron" :class="{ rotated: showProjects }" />
             <span>My Projects</span>
           </button>
-          <button class="add-project-btn" @click="showAddProject = true" title="Add Project">
+          <button class="add-project-btn" @click="openAddProject" title="Add Project">
             <Plus :size="16" />
           </button>
         </div>
@@ -235,11 +244,19 @@
           <button
             v-for="project in projects"
             :key="project.id"
-            :class="['nav-link project-link', { active: activeProject === project.name }]"
+            :class="['nav-link project-link', { active: activeProjectName === project.name.toLowerCase() }]"
             @click="selectProject(project.name)"
           >
             <span class="project-dot" :style="{ backgroundColor: project.color }"></span>
             <span class="link-label">{{ project.name }}</span>
+            <span
+              v-if="!['Work', 'Personal', 'Study'].includes(project.name)"
+              class="project-delete-btn"
+              @click.stop="deleteProject(project.id)"
+              title="Delete project"
+            >
+              <X :size="12" />
+            </span>
           </button>
         </div>
       </div>
@@ -257,11 +274,64 @@
         <span class="help-badge-dot"></span>
       </button>
     </div>
+
+    <!-- Add Project Modal -->
+    <transition name="modal">
+      <div v-if="showAddProject" class="modal-backdrop" @click.self="closeAddProject">
+        <div class="project-modal" role="dialog" aria-modal="true" aria-labelledby="add-project-title">
+          <div class="modal-header">
+            <h3 id="add-project-title">Add project</h3>
+            <button class="modal-close-btn" @click="closeAddProject" title="Close">
+              <X :size="16" />
+            </button>
+          </div>
+
+          <form @submit.prevent="submitAddProject" class="project-form">
+            <div class="form-group">
+              <label for="project-name-input">Project name</label>
+              <input
+                id="project-name-input"
+                ref="projectNameInputRef"
+                v-model="newProjectName"
+                type="text"
+                class="form-control"
+                placeholder="e.g. Client X, Goals, Finances"
+                required
+                maxlength="50"
+                @keydown.esc="closeAddProject"
+              />
+            </div>
+
+            <div class="form-group">
+              <label>Color tag</label>
+              <div class="color-options-grid">
+                <button
+                  v-for="c in projectColors"
+                  :key="c.color"
+                  type="button"
+                  :class="['color-choice-btn', { selected: newProjectColor === c.color }]"
+                  :style="{ backgroundColor: c.color }"
+                  :title="c.name"
+                  @click="newProjectColor = c.color"
+                >
+                  <Check v-if="newProjectColor === c.color" :size="12" class="color-check-icon" />
+                </button>
+              </div>
+            </div>
+
+            <div class="modal-actions">
+              <button type="button" class="btn-cancel" @click="closeAddProject">Cancel</button>
+              <button type="submit" class="btn-submit" :disabled="!newProjectName.trim()">Add</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </transition>
   </aside>
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, nextTick } from 'vue'
 import {
   ChevronDown,
   ChevronRight,
@@ -276,6 +346,7 @@ import {
   SlidersHorizontal,
   TrendingUp,
   X,
+  Check,
   Flame,
   Zap,
   Sun,
@@ -297,10 +368,12 @@ const props = defineProps({
   },
   isBulkGenerating: Boolean,
   isCollapsed: Boolean,
+  isMobile: Boolean,
 })
 
 const emit = defineEmits([
   'toggle',
+  'close-mobile',
   'quick-add',
   'filter-view',
   'filter-project',
@@ -326,11 +399,94 @@ const isDark = ref(false)
 const userMenuRef = ref(null)
 const activeProject = ref('')
 
-const projects = ref([
+const defaultProjects = [
   { id: 1, name: 'Work', color: '#eb8909' },
   { id: 2, name: 'Personal', color: '#246fe0' },
   { id: 3, name: 'Study', color: '#058527' },
-])
+]
+
+const projects = ref(loadProjects())
+const newProjectName = ref('')
+const newProjectColor = ref('#246fe0')
+const projectNameInputRef = ref(null)
+
+const projectColors = [
+  { name: 'Red', color: '#dc4c3e' },
+  { name: 'Orange', color: '#eb8909' },
+  { name: 'Amber', color: '#e29f0d' },
+  { name: 'Green', color: '#058527' },
+  { name: 'Teal', color: '#14aaf5' },
+  { name: 'Blue', color: '#246fe0' },
+  { name: 'Purple', color: '#af38eb' },
+  { name: 'Charcoal', color: '#808080' },
+]
+
+function loadProjects() {
+  try {
+    const saved = localStorage.getItem('todue_projects')
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed
+    }
+  } catch (e) {
+    console.error('Failed to load projects from storage', e)
+  }
+  return [...defaultProjects]
+}
+
+function saveProjects() {
+  try {
+    localStorage.setItem('todue_projects', JSON.stringify(projects.value))
+  } catch (e) {
+    console.error('Failed to save projects to storage', e)
+  }
+}
+
+function openAddProject() {
+  showAddProject.value = true
+  newProjectName.value = ''
+  newProjectColor.value = '#246fe0'
+  nextTick(() => {
+    projectNameInputRef.value?.focus()
+  })
+}
+
+function closeAddProject() {
+  showAddProject.value = false
+  newProjectName.value = ''
+}
+
+function submitAddProject() {
+  const trimmed = newProjectName.value.trim()
+  if (!trimmed) return
+  const existing = projects.value.find(p => p.name.toLowerCase() === trimmed.toLowerCase())
+  if (existing) {
+    selectProject(existing.name)
+    closeAddProject()
+    return
+  }
+  const newProj = {
+    id: Date.now(),
+    name: trimmed,
+    color: newProjectColor.value,
+  }
+  projects.value.push(newProj)
+  saveProjects()
+  selectProject(newProj.name)
+  closeAddProject()
+}
+
+function deleteProject(id) {
+  const proj = projects.value.find(p => p.id === id)
+  if (!proj) return
+  if (confirm(`Delete project "${proj.name}"?`)) {
+    projects.value = projects.value.filter(p => p.id !== id)
+    saveProjects()
+    if (activeProjectName.value === proj.name.toLowerCase()) {
+      emit('filter-view', 'inbox')
+    }
+  }
+}
 
 // ── Computed ─────────────────────────────────────────────
 const userName = computed(() => {
@@ -355,6 +511,10 @@ const activeView = computed(() => {
   return 'inbox'
 })
 
+const activeProjectName = computed(() => {
+  return (props.filters?.project || activeProject.value || '').toLowerCase()
+})
+
 const isFilterActive = computed(() => {
   return !!props.filters?.priority || props.filters?.status === 'done' || showFiltersSubmenu.value
 })
@@ -368,14 +528,26 @@ const setupCompletedCount = computed(() => {
 })
 
 // ── Navigation Handlers ──────────────────────────────────
+function handleQuickAdd() {
+  emit('quick-add')
+  if (props.isMobile) emit('close-mobile')
+}
+
+function handleSearch() {
+  emit('open-search')
+  if (props.isMobile) emit('close-mobile')
+}
+
 function handleNav(view) {
   activeProject.value = ''
   emit('filter-view', view)
+  if (props.isMobile) emit('close-mobile')
 }
 
 function handlePriority(priority) {
   activeProject.value = ''
   emit('filter-priority', priority)
+  if (props.isMobile) emit('close-mobile')
 }
 
 function toggleFiltersSection() {
@@ -385,6 +557,7 @@ function toggleFiltersSection() {
 function selectProject(name) {
   activeProject.value = name
   emit('filter-project', name)
+  if (props.isMobile) emit('close-mobile')
 }
 
 // ── Dropdown & Theme ─────────────────────────────────────
@@ -1025,5 +1198,298 @@ onUnmounted(() => {
 .dropdown-leave-to {
   opacity: 0;
   transform: translateY(-4px);
+}
+
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 200ms ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+
+/* ── Project Delete Button ──────────────────────────────── */
+.project-delete-btn {
+  margin-left: auto;
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--text-tertiary);
+  transition: all var(--transition-fast);
+}
+
+.project-link:hover .project-delete-btn {
+  opacity: 1;
+}
+
+.project-delete-btn:hover {
+  background: var(--bg-hover);
+  color: var(--priority-high);
+}
+
+/* ── Add Project Modal ──────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.project-modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-xl);
+  width: 100%;
+  max-width: 420px;
+  overflow: hidden;
+  animation: modalScale 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalScale {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.modal-header h3 {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--border-radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-close-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.project-form {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.form-control {
+  padding: 10px 12px;
+  border-radius: var(--border-radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.form-control:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(220, 76, 62, 0.15);
+}
+
+.color-options-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 8px;
+}
+
+.color-choice-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--transition-fast);
+}
+
+.color-choice-btn:hover {
+  transform: scale(1.1);
+}
+
+.color-choice-btn.selected {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 2px var(--bg-surface);
+}
+
+.color-check-icon {
+  color: #ffffff;
+  stroke-width: 3px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.btn-cancel {
+  padding: 8px 16px;
+  border-radius: var(--border-radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-cancel:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.btn-submit {
+  padding: 8px 18px;
+  border-radius: var(--border-radius-md);
+  border: none;
+  background: var(--color-primary);
+  color: #ffffff;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.btn-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-submit:not(:disabled):hover {
+  opacity: 0.9;
+}
+
+/* ── Mobile Sidebar Drawer Responsive ───────────────────── */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100vh;
+    height: 100dvh;
+    width: 290px !important;
+    max-width: 85vw;
+    min-width: unset !important;
+    background: var(--bg-surface);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.18);
+    z-index: 1050;
+    transform: translateX(0);
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.28s ease;
+  }
+
+  .sidebar.collapsed {
+    transform: translateX(-100%) !important;
+    width: 290px !important;
+    min-width: unset !important;
+    box-shadow: none;
+    pointer-events: none;
+  }
+
+  .sidebar-header {
+    height: 56px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .user-dropdown-btn {
+    max-width: 180px;
+  }
+
+  .close-mobile-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--border-radius-sm);
+    color: var(--text-secondary);
+  }
+
+  .close-mobile-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .quick-add-container {
+    padding: 12px 14px 4px;
+  }
+
+  .quick-add-task-btn {
+    padding: 10px 14px;
+    border-radius: var(--border-radius-md);
+  }
+
+  .nav-link {
+    padding: 10px 14px;
+    font-size: var(--font-size-sm);
+    border-radius: var(--border-radius-md);
+    margin-bottom: 3px;
+  }
+
+  .sidebar-body {
+    padding: 8px 12px 24px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sidebar-footer {
+    padding: 14px 16px;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  }
 }
 </style>

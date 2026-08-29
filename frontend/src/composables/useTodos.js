@@ -52,7 +52,6 @@ export function useTodos() {
     const requestId = ++currentRequestId
     isLoading.value = true
     error.value = null
-    todos.value = [] // Clear previous tasks immediately to prevent showing stale items
 
     try {
       const params = {
@@ -256,7 +255,7 @@ export function useTodos() {
     fetchTodos()
   }
 
-  function clearFilters() {
+  function clearFilters(shouldFetch = true) {
     filters.view = 'inbox'
     filters.status = ''
     filters.priority = ''
@@ -265,7 +264,9 @@ export function useTodos() {
     filters.sortBy = 'created_at'
     filters.sortOrder = 'desc'
     pagination.page = 1
-    fetchTodos()
+    if (shouldFetch) {
+      fetchTodos()
+    }
   }
 
   function toggleSortOrder() {
