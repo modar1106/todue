@@ -1,4 +1,4 @@
-# Todue  Clone — Full-Stack Todo List Web App
+# Todue   — Full-Stack Todo List Web App
 
 A modern, Todue -inspired Todo List application with multi-user authentication, built with **FastAPI** (Python), **Vue 3 + Vite**, and **Supabase** (PostgreSQL).
 

@@ -397,7 +397,7 @@
       </div>
 
       <div class="footer-bottom">
-        <span>© 2026 Todue  Clone. Built with Vue 3 & FastAPI. All rights reserved.</span>
+        <span>© 2026 Todue  . Built with Vue 3 & FastAPI. All rights reserved.</span>
         <div class="footer-status">
           <span class="status-dot"></span>
           <span>All systems operational</span>

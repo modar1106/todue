@@ -1,5 +1,5 @@
 -- ============================================================
--- Todue  Clone — Supabase Database Migration
+-- Todue   — Supabase Database Migration
 -- Run this script in the Supabase SQL Editor
 -- ============================================================
 

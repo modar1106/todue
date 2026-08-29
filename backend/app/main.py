@@ -17,7 +17,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     app = FastAPI(
-        title="Todue  Clone API",
+        title="Todue   API",
         description=(
             "REST API for a Todue -inspired Todo List application. "
             "Features multi-user authentication, CRUD operations, "
@@ -61,7 +61,7 @@ def create_app() -> FastAPI:
         """Health check endpoint."""
         return {
             "status": "healthy",
-            "service": "Todue  Clone API",
+            "service": "Todue   API",
             "version": "1.0.0",
         }
 
