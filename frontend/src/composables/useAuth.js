@@ -42,6 +42,8 @@ export function useAuth() {
         message = detail
       } else if (Array.isArray(detail) && detail.length > 0) {
         message = detail.map(d => d.msg || JSON.stringify(d)).join(', ')
+      } else if (err.message && !err.response) {
+        message = `Cannot connect to server: ${err.message}`
       }
       error.value = message
       throw new Error(message)
@@ -77,6 +79,8 @@ export function useAuth() {
         message = detail
       } else if (Array.isArray(detail) && detail.length > 0) {
         message = detail.map(d => d.msg || JSON.stringify(d)).join(', ')
+      } else if (err.message && !err.response) {
+        message = `Cannot connect to server: ${err.message}`
       }
       error.value = message
       throw new Error(message)
