@@ -1,9 +1,10 @@
 /**
  * Todos composable.
  * Manages todo list state, CRUD, filtering, sorting, pagination, and bulk generation.
+ * Routes requests to dedicated backend endpoints per view.
  */
 
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import api from '../utils/api'
 
 export function useTodos() {
@@ -36,10 +37,33 @@ export function useTodos() {
   // Stats
   const stats = reactive({
     total: 0,
+    active: 0,
     pending: 0,
     progress: 0,
     done: 0,
   })
+
+  // Helper to compute default current week range (Mon-Sun)
+  function getDefaultWeekRange() {
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const dayIndex = (today.getDay() + 6) % 7
+    const monday = new Date(today)
+    monday.setDate(today.getDate() - dayIndex)
+    const sunday = new Date(monday)
+    sunday.setDate(monday.getDate() + 6)
+
+    const format = (d) => {
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${y}-${m}-${day}`
+    }
+    return { startDate: format(monday), endDate: format(sunday) }
+  }
+
+  // Upcoming view date range (managed by TodoList.vue)
+  const upcomingDateRange = reactive(getDefaultWeekRange())
 
   // ── Computed ───────────────────────────────────────────
   const hasNextPage = computed(() => pagination.page < pagination.totalPages)
@@ -54,31 +78,61 @@ export function useTodos() {
     error.value = null
 
     try {
-      const params = {
-        page: pagination.page,
-        page_size: pagination.pageSize,
-        sort_by: filters.sortBy,
-        sort_order: filters.sortOrder,
+      let response
+
+      if (filters.view === 'upcoming') {
+        // Dedicated endpoint: no pagination, date-range based
+        response = await api.get('/todos/upcoming', {
+          params: {
+            start_date: upcomingDateRange.startDate,
+            end_date: upcomingDateRange.endDate,
+          }
+        })
+      } else if (filters.view === 'today') {
+        // Dedicated endpoint: paginated today + overdue
+        response = await api.get('/todos/today', {
+          params: {
+            page: pagination.page,
+            page_size: pagination.pageSize,
+          }
+        })
+      } else if (filters.view === 'done') {
+        // Dedicated endpoint: paginated completed tasks
+        response = await api.get('/todos/completed', {
+          params: {
+            page: pagination.page,
+            page_size: pagination.pageSize,
+          }
+        })
+      } else {
+        // General endpoint: Inbox / Project / Search
+        const params = {
+          page: pagination.page,
+          page_size: pagination.pageSize,
+          sort_by: filters.sortBy,
+          sort_order: filters.sortOrder,
+        }
+        if (filters.status && ['pending', 'progress', 'done', 'active', 'all'].includes(filters.status)) {
+          params.status = filters.status
+        }
+        if (filters.priority && ['low', 'medium', 'high'].includes(filters.priority)) {
+          params.priority = filters.priority
+        }
+        if (filters.project && filters.project !== 'Inbox') {
+          params.project = filters.project
+        }
+        if (filters.search) params.search = filters.search
+
+        response = await api.get('/todos', { params })
       }
 
-      if (filters.status && ['pending', 'progress', 'done'].includes(filters.status)) {
-        params.status = filters.status
-      }
-      if (filters.priority && ['low', 'medium', 'high'].includes(filters.priority)) {
-        params.priority = filters.priority
-      }
-      if (filters.project && filters.project !== 'Inbox') {
-        params.project = filters.project
-      }
-      if (filters.search) params.search = filters.search
-
-      const { data } = await api.get('/todos', { params })
+      const { data } = response
 
       // Only update state if this request is still the most recent one
       if (requestId === currentRequestId) {
         todos.value = data.data
-        pagination.total = data.total
-        pagination.totalPages = data.total_pages
+        pagination.total = data.total ?? data.data?.length ?? 0
+        pagination.totalPages = data.total_pages ?? 0
       }
     } catch (err) {
       if (requestId === currentRequestId) {
@@ -96,6 +150,7 @@ export function useTodos() {
     try {
       const { data } = await api.get('/todos/stats')
       stats.total = data.total ?? 0
+      stats.active = data.active ?? 0
       stats.pending = data.pending ?? 0
       stats.progress = data.progress ?? 0
       stats.done = data.done ?? 0
@@ -142,6 +197,8 @@ export function useTodos() {
       if (updateData.status && updateData.status !== previousTodo.status) {
         if (stats[previousTodo.status] > 0) stats[previousTodo.status]--
         if (stats[updateData.status] !== undefined) stats[updateData.status]++
+        // Recalculate active
+        stats.active = stats.pending + stats.progress
       }
     }
 
@@ -167,6 +224,7 @@ export function useTodos() {
         if (updateData.status && updateData.status !== previousTodo.status) {
           if (stats[updateData.status] > 0) stats[updateData.status]--
           if (stats[previousTodo.status] !== undefined) stats[previousTodo.status]++
+          stats.active = stats.pending + stats.progress
         }
       }
       error.value = err.response?.data?.detail || 'Failed to update todo.'
@@ -186,6 +244,7 @@ export function useTodos() {
       if (removedTodo.status && stats[removedTodo.status] > 0) {
         stats[removedTodo.status]--
       }
+      stats.active = stats.pending + stats.progress
     }
 
     if (selectedTodo.value?.id === id) {
@@ -282,6 +341,7 @@ export function useTodos() {
     pagination.total = 0
     pagination.totalPages = 0
     stats.total = 0
+    stats.active = 0
     stats.pending = 0
     stats.progress = 0
     stats.done = 0
@@ -302,6 +362,7 @@ export function useTodos() {
     pagination,
     filters,
     stats,
+    upcomingDateRange,
 
     // Computed
     hasNextPage,

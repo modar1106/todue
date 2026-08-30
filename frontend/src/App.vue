@@ -59,6 +59,7 @@
           :filters="filters"
           :is-loading="isLoading"
           :error="error"
+          :upcoming-date-range="upcomingDateRange"
           @create="handleCreate"
           @update="handleUpdate"
           @delete="handleDelete"
@@ -72,6 +73,7 @@
           @go-to-page="goToPage"
           @set-page-size="setPageSize"
           @toggle-sidebar="sidebarCollapsed = !sidebarCollapsed"
+          @date-range-change="handleDateRangeChange"
         />
       </main>
     </div>
@@ -124,6 +126,7 @@ const {
   pagination,
   filters,
   stats,
+  upcomingDateRange,
   fetchTodos,
   fetchStats,
   createTodo,
@@ -165,11 +168,8 @@ onMounted(() => {
 
   if (route.path === '/app') {
     const newView = route.query.view || 'inbox'
-    const validStatuses = ['pending', 'progress', 'done']
     filters.view = newView
-    filters.status = validStatuses.includes(route.query.status)
-      ? route.query.status
-      : (newView === 'today' ? 'pending' : newView === 'upcoming' ? 'progress' : newView === 'done' ? 'done' : '')
+    filters.status = ['pending', 'progress', 'done', 'active', 'all'].includes(route.query.status) ? route.query.status : ''
     filters.project = route.query.project || ''
     filters.priority = ['low', 'medium', 'high'].includes(route.query.priority) ? route.query.priority : ''
     filters.search = route.query.search || ''
@@ -187,8 +187,8 @@ onUnmounted(() => {
 })
 
 // Watch route queries for browser back/forward and external navigation
-watch(() => route.path, (newPath) => {
-  if (newPath === '/app' && isAuthenticated.value) {
+watch(() => route.path, (newPath, oldPath) => {
+  if (newPath === '/app' && oldPath !== '/app' && isAuthenticated.value) {
     loadData()
   }
 })
@@ -196,20 +196,11 @@ watch(() => route.path, (newPath) => {
 watch(() => route.query, (newQuery) => {
   if (route.path === '/app' && isAuthenticated.value) {
     const newView = newQuery.view || 'inbox'
-    const newProject = newQuery.project || ''
-    const validStatuses = ['pending', 'progress', 'done']
-    const newStatus = validStatuses.includes(newQuery.status)
-      ? newQuery.status
-      : (newView === 'today' ? 'pending' : newView === 'upcoming' ? 'progress' : newView === 'done' ? 'done' : '')
-    const validPriorities = ['low', 'medium', 'high']
-    const newPriority = validPriorities.includes(newQuery.priority) ? newQuery.priority : ''
-    const newSearch = newQuery.search || ''
-
     filters.view = newView
-    filters.project = newProject
-    filters.status = newStatus
-    filters.priority = newPriority
-    filters.search = newSearch
+    filters.status = ['pending', 'progress', 'done', 'active', 'all'].includes(newQuery.status) ? newQuery.status : ''
+    filters.project = newQuery.project || ''
+    filters.priority = ['low', 'medium', 'high'].includes(newQuery.priority) ? newQuery.priority : ''
+    filters.search = newQuery.search || ''
     pagination.page = 1
     fetchTodos()
   }
@@ -319,6 +310,13 @@ function handleFilterPriority(priority) {
 function handleClearFilters() {
   clearFilters(false)
   router.replace({ path: '/app', query: {} })
+}
+
+// ── Upcoming Date Range ─────────────────────────────────
+function handleDateRangeChange({ startDate, endDate }) {
+  upcomingDateRange.startDate = startDate
+  upcomingDateRange.endDate = endDate
+  fetchTodos()
 }
 
 // ── Bulk Generate ────────────────────────────────────────

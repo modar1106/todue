@@ -36,6 +36,7 @@ class TodoSortField(str, Enum):
     TITLE = "title"
     STATUS = "status"
     PRIORITY = "priority"
+    DUE_DATE = "due_date"
     CREATED_AT = "created_at"
     UPDATED_AT = "updated_at"
 
@@ -123,9 +124,18 @@ class TodoListResponse(BaseModel):
     total_pages: int
 
 
+class TodoUpcomingResponse(BaseModel):
+    """Upcoming view response — all tasks in a date range, no pagination."""
+    data: list[TodoResponse]
+    start_date: str
+    end_date: str
+    total: int
+
+
 class TodoStatsResponse(BaseModel):
     """Statistics count response."""
     total: int = 0
+    active: int = 0
     pending: int = 0
     progress: int = 0
     done: int = 0

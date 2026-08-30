@@ -302,6 +302,7 @@ function resetForm() {
 
 .form-badge-row {
   display: flex;
+  flex-direction: row;
   align-items: center;
   justify-content: space-between;
   margin-top: 10px;
@@ -309,7 +310,17 @@ function resetForm() {
   flex-wrap: wrap;
 }
 
+.badge-left {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .badge-item {
+  display: inline-flex;
+  align-items: center;
   position: relative;
 }
 

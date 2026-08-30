@@ -141,7 +141,7 @@
         >
           <Inbox :size="18" class="link-icon inbox-icon" />
           <span v-if="!isCollapsed" class="link-label">Inbox</span>
-          <span v-if="!isCollapsed && stats.total > 0" class="link-count">{{ stats.total }}</span>
+          <span v-if="!isCollapsed && (stats.active || stats.total) > 0" class="link-count">{{ stats.active || stats.total }}</span>
         </button>
 
         <!-- Today -->
@@ -209,11 +209,12 @@
             <span>Low Priority</span>
           </button>
           <button
-            :class="['sub-nav-link', { active: filters?.status === 'done' }]"
+            :class="['sub-nav-link', { active: filters?.view === 'done' || filters?.status === 'done' }]"
             @click="handleNav('done')"
           >
             <CheckCircle2 :size="14" class="text-green" />
             <span>Completed Tasks</span>
+            <span v-if="stats.done > 0" class="link-count">{{ stats.done }}</span>
           </button>
         </div>
 

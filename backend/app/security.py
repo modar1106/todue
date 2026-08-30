@@ -30,12 +30,17 @@ class CurrentUser:
         return f"CurrentUser(id={self.id}, email={self.email})"
 
 
-async def get_current_user(
+def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
 ) -> CurrentUser:
     """
     FastAPI dependency that validates the JWT Bearer token
     and returns the authenticated user.
+
+    Strategy:
+      1. Fast local HS256 verification using SUPABASE_JWT_SECRET (~0.05ms)
+      2. Remote Supabase Auth verification as fallback (~300ms)
+      3. If both fail → 401 Unauthorized (NEVER trust unverified tokens)
 
     Raises:
         HTTPException 401: If token is missing, expired, or invalid.
@@ -48,6 +53,34 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # 1. Fast local verification using SUPABASE_JWT_SECRET (0.05ms, no network overhead)
+    settings = get_settings()
+    if settings.SUPABASE_JWT_SECRET:
+        try:
+            payload = jwt.decode(
+                token,
+                settings.SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                options={"verify_aud": False},
+            )
+            user_id = payload.get("sub")
+            if user_id:
+                return CurrentUser(
+                    user_id=str(user_id),
+                    email=payload.get("email", ""),
+                    role=payload.get("role", "authenticated"),
+                )
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has expired",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        except Exception:
+            # Fall through to Supabase API check if local decode fails
+            pass
+
+    # 2. Remote fallback verification via Supabase Auth API
     try:
         from app.database import get_supabase_admin
         supabase = get_supabase_admin()
@@ -70,21 +103,9 @@ async def get_current_user(
     except HTTPException:
         raise
     except Exception as e:
-        # Fallback decode if Supabase network call fails but payload has valid sub
-        try:
-            payload = jwt.decode(token, options={"verify_signature": False})
-            user_id = payload.get("sub")
-            if user_id:
-                return CurrentUser(
-                    user_id=str(user_id),
-                    email=payload.get("email", ""),
-                    role=payload.get("role", "authenticated"),
-                )
-        except Exception:
-            pass
-
+        # Both local and remote verification failed — reject the request
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication error: {str(e)}",
+            detail="Authentication failed. Please log in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )

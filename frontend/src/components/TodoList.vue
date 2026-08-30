@@ -6,7 +6,16 @@
     <div v-if="isUpcomingView" class="upcoming-view-wrapper">
       <!-- Title & Month Bar -->
       <div class="upcoming-header">
-        <h1 class="list-title">Upcoming</h1>
+        <div class="upcoming-title-row">
+          <button
+            class="mobile-menu-btn"
+            @click="$emit('toggle-sidebar')"
+            title="Toggle sidebar"
+          >
+            <Menu :size="20" />
+          </button>
+          <h1 class="list-title">Upcoming</h1>
+        </div>
         <div class="upcoming-controls">
           <div class="month-selector-wrapper" ref="monthSelectorRef">
             <button
@@ -117,6 +126,8 @@
           </div>
         </div>
       </div>
+
+      <!-- Upcoming view does not use pagination (dedicated endpoint returns all tasks in range) -->
     </div>
 
     <!-- ======================================================== -->
@@ -236,7 +247,7 @@
 
       <!-- Pagination Bar -->
       <PaginationBar
-        v-if="pagination.totalPages > 1"
+        v-if="pagination && pagination.total > 0"
         :page="pagination.page"
         :page-size="pagination.pageSize"
         :total="pagination.total"
@@ -260,7 +271,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import {
   Menu,
   Plus,
@@ -291,6 +302,10 @@ const props = defineProps({
     type: Object,
     default: () => ({ status: '', priority: '', search: '' }),
   },
+  upcomingDateRange: {
+    type: Object,
+    default: () => ({ startDate: '', endDate: '' }),
+  },
   isLoading: Boolean,
   error: String,
 })
@@ -299,7 +314,7 @@ const emit = defineEmits([
   'create', 'update', 'delete', 'update-status',
   'filter', 'toggle-sort', 'clear-filters', 'retry',
   'prev-page', 'next-page', 'go-to-page', 'set-page-size',
-  'toggle-sidebar',
+  'toggle-sidebar', 'date-range-change',
 ])
 
 const showForm = ref(false)
@@ -367,7 +382,7 @@ onUnmounted(() => {
 })
 
 const isUpcomingView = computed(() => {
-  return props.filters?.view === 'upcoming' || props.filters?.status === 'progress'
+  return props.filters?.view === 'upcoming'
 })
 
 const userName = computed(() => {
@@ -387,12 +402,10 @@ const hasFilters = computed(() => {
 
 const pageTitle = computed(() => {
   if (props.filters?.project) return props.filters.project
-  if (props.filters?.view === 'done' || props.filters?.status === 'done') return 'Completed Tasks'
+  if (props.filters?.view === 'done') return 'Completed Tasks'
   if (props.filters?.view === 'inbox') return 'Inbox'
   if (props.filters?.view === 'today') return 'Today'
   if (props.filters?.view === 'upcoming') return 'Upcoming'
-  if (props.filters?.status === 'pending') return 'Today'
-  if (props.filters?.status === 'progress') return 'Upcoming'
   if (props.filters?.priority === 'high') return 'High Priority'
   if (props.filters?.priority === 'medium') return 'Medium Priority'
   if (props.filters?.priority === 'low') return 'Low Priority'
@@ -400,6 +413,13 @@ const pageTitle = computed(() => {
 })
 
 // ── Upcoming Date Calculations ───────────────────────────
+function formatLocalIso(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const date = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${date}`
+}
+
 const currentMonthYearLabel = computed(() => {
   const d = new Date()
   d.setDate(d.getDate() + weekOffset.value * 7)
@@ -408,18 +428,19 @@ const currentMonthYearLabel = computed(() => {
 
 const weekDays = computed(() => {
   const days = []
-  const today = new Date()
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const startOfWeek = new Date(today)
   const dayIndex = (today.getDay() + 6) % 7 // Monday = 0
   startOfWeek.setDate(today.getDate() - dayIndex + weekOffset.value * 7)
 
   const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const todayIso = today.toISOString().split('T')[0]
+  const todayIso = formatLocalIso(today)
 
   for (let i = 0; i < 7; i++) {
     const cur = new Date(startOfWeek)
     cur.setDate(startOfWeek.getDate() + i)
-    const iso = cur.toISOString().split('T')[0]
+    const iso = formatLocalIso(cur)
     days.push({
       name: names[i],
       number: cur.getDate(),
@@ -430,16 +451,29 @@ const weekDays = computed(() => {
   return days
 })
 
+// Watch week changes in upcoming view and notify parent to fetch tasks for the date range
+watch([weekDays, isUpcomingView], ([days, isUpcoming]) => {
+  if (isUpcoming && days && days.length === 7) {
+    const startDate = days[0].iso
+    const endDate = days[6].iso
+    if (props.upcomingDateRange?.startDate !== startDate || props.upcomingDateRange?.endDate !== endDate) {
+      emit('date-range-change', { startDate, endDate })
+    }
+  }
+}, { immediate: true })
+
 const upcomingSections = computed(() => {
   const sections = []
-  const today = new Date()
-  const todayIso = today.toISOString().split('T')[0]
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const todayIso = formatLocalIso(today)
   const tomorrow = new Date(today)
   tomorrow.setDate(today.getDate() + 1)
-  const tomorrowIso = tomorrow.toISOString().split('T')[0]
+  const tomorrowIso = formatLocalIso(tomorrow)
 
-  // Display either the selected day or all 7 days of the viewed week
-  const days = selectedDate.value
+  // Display either the selected day (if valid in this week) or all 7 days of the viewed week
+  const isSelectedInWeek = selectedDate.value && weekDays.value.some(d => d.iso === selectedDate.value)
+  const days = isSelectedInWeek
     ? weekDays.value.filter(d => d.iso === selectedDate.value)
     : weekDays.value
 
@@ -459,7 +493,8 @@ const upcomingSections = computed(() => {
     }
 
     const tasksForDay = props.todos.filter(t => {
-      if (t.due_date) return t.due_date === day.iso
+      const taskDue = t.due_date ? String(t.due_date).slice(0, 10) : ''
+      if (taskDue) return taskDue === day.iso
       return day.iso === todayIso
     })
 
@@ -470,37 +505,12 @@ const upcomingSections = computed(() => {
     })
   }
 
-  // Also include any tasks with due dates outside this week
-  const weekSet = new Set(weekDays.value.map(d => d.iso))
-  const externalDates = [...new Set(props.todos.map(t => t.due_date).filter(Boolean))]
-    .filter(iso => !weekSet.has(iso))
-    .sort()
-
-  for (const extIso of externalDates) {
-    const parts = extIso.split('-').map(Number)
-    if (parts.length === 3 && !parts.some(isNaN)) {
-      const dateObj = new Date(parts[0], parts[1] - 1, parts[2])
-      const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' })
-      const monthName = dateObj.toLocaleDateString('en-US', { month: 'short' })
-      const dayNum = dateObj.getDate()
-      const label = `${dayNum} ${monthName} · ${dayName}`
-
-      const tasksForDay = props.todos.filter(t => t.due_date === extIso)
-      if (tasksForDay.length > 0) {
-        sections.push({
-          iso: extIso,
-          label,
-          tasks: tasksForDay,
-        })
-      }
-    }
-  }
-
   return sections
 })
 
 function changeWeek(diff) {
   weekOffset.value += diff
+  selectedDate.value = ''
 }
 
 function resetToToday() {
@@ -653,6 +663,12 @@ defineExpose({ openForm })
 
 .upcoming-header {
   margin-bottom: 12px;
+}
+
+.upcoming-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .upcoming-controls {
